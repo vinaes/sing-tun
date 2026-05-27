@@ -273,6 +273,28 @@ func (t *NativeTun) Start() error {
 		}*/
 
 		if len(t.options.Inet6Address) == 0 {
+			loopback6 := [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+			permitLoopbackCondition := make([]winsys.FWPM_FILTER_CONDITION0, 1)
+			permitLoopbackCondition[0].FieldKey = winsys.FWPM_CONDITION_IP_REMOTE_ADDRESS
+			permitLoopbackCondition[0].MatchType = winsys.FWP_MATCH_EQUAL
+			permitLoopbackCondition[0].ConditionValue.Type = winsys.FWP_BYTE_ARRAY16_TYPE
+			permitLoopbackCondition[0].ConditionValue.Value = uintptr(unsafe.Pointer(&loopback6[0]))
+
+			permitLoopback6 := winsys.FWPM_FILTER0{}
+			permitLoopback6.FilterCondition = &permitLoopbackCondition[0]
+			permitLoopback6.NumFilterConditions = 1
+			permitLoopback6.DisplayData = winsys.CreateDisplayData(TunnelType, "permit ipv6 loopback")
+			permitLoopback6.SubLayerKey = subLayerKey
+			permitLoopback6.LayerKey = winsys.FWPM_LAYER_ALE_AUTH_CONNECT_V6
+			permitLoopback6.Action.Type = winsys.FWP_ACTION_PERMIT
+			permitLoopback6.Weight.Type = winsys.FWP_UINT8
+			permitLoopback6.Weight.Value = uintptr(13)
+			permitLoopback6.Flags = winsys.FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT
+			err = winsys.FwpmFilterAdd0(engine, &permitLoopback6, 0, &filterId)
+			if err != nil {
+				return os.NewSyscallError("FwpmFilterAdd0", err)
+			}
+
 			blockFilter := winsys.FWPM_FILTER0{}
 			blockFilter.DisplayData = winsys.CreateDisplayData(TunnelType, "block ipv6")
 			blockFilter.SubLayerKey = subLayerKey
