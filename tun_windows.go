@@ -70,12 +70,40 @@ func New(options Options) (WinTun, error) {
 	return nativeTun, nil
 }
 
+// waitIPInterface waits for the adapter's IP interface row of the given family
+// to be registered with the stack. Registration happens asynchronously after
+// adapter creation, so right after CreateAdapter every winipcfg call on the row
+// (GetIpInterfaceEntry, address/DNS setters) can fail with ERROR_NOT_FOUND
+// ("element not found"). The race is widest on a cold boot, when an auto-started
+// service configures the adapter while the network stack is still storming.
+// wireguard-windows waits for the same arrival before configuring.
+func waitIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily) error {
+	const (
+		step    = 100 * time.Millisecond
+		timeout = 5 * time.Second
+	)
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := luid.IPInterface(family)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, windows.ERROR_NOT_FOUND) || time.Now().After(deadline) {
+			return E.Cause(err, "wait for interface registration")
+		}
+		time.Sleep(step)
+	}
+}
+
 func (t *NativeTun) configure() error {
 	if t.options.EXP_ExternalConfiguration {
 		return nil
 	}
 	luid := winipcfg.LUID(t.adapter.LUID())
 	if len(t.options.Inet4Address) > 0 {
+		if err := waitIPInterface(luid, winipcfg.AddressFamily(windows.AF_INET)); err != nil {
+			return err
+		}
 		err := luid.SetIPAddressesForFamily(winipcfg.AddressFamily(windows.AF_INET), t.options.Inet4Address)
 		if err != nil {
 			return E.Cause(err, "set ipv4 address")
@@ -97,6 +125,9 @@ func (t *NativeTun) configure() error {
 		}
 	}
 	if len(t.options.Inet6Address) > 0 {
+		if err := waitIPInterface(luid, winipcfg.AddressFamily(windows.AF_INET6)); err != nil {
+			return err
+		}
 		err := luid.SetIPAddressesForFamily(winipcfg.AddressFamily(windows.AF_INET6), t.options.Inet6Address)
 		if err != nil {
 			return E.Cause(err, "set ipv6 address")
@@ -123,7 +154,7 @@ func (t *NativeTun) configure() error {
 	if len(t.options.Inet4Address) > 0 {
 		inetIf, err := luid.IPInterface(winipcfg.AddressFamily(windows.AF_INET))
 		if err != nil {
-			return err
+			return E.Cause(err, "get ipv4 interface")
 		}
 		inetIf.ForwardingEnabled = true
 		inetIf.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
@@ -143,7 +174,7 @@ func (t *NativeTun) configure() error {
 	if len(t.options.Inet6Address) > 0 {
 		inet6If, err := luid.IPInterface(winipcfg.AddressFamily(windows.AF_INET6))
 		if err != nil {
-			return err
+			return E.Cause(err, "get ipv6 interface")
 		}
 		inet6If.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
 		inet6If.DadTransmits = 0
