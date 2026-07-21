@@ -79,8 +79,13 @@ func New(options Options) (WinTun, error) {
 // wireguard-windows waits for the same arrival before configuring.
 func waitIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily) error {
 	const (
-		step    = 100 * time.Millisecond
-		timeout = 5 * time.Second
+		step = 100 * time.Millisecond
+		// Generous: on a cold boot the interface can take well over 5s to
+		// register while the network stack storms, and each failed attempt
+		// otherwise recreates the adapter and re-races. Riding out a single
+		// attempt is cheaper and avoids a spurious start_other ("element not
+		// found") reaching the UI.
+		timeout = 15 * time.Second
 	)
 	deadline := time.Now().Add(timeout)
 	for {
