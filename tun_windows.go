@@ -44,6 +44,17 @@ func New(options Options) (WinTun, error) {
 		return nil, os.ErrInvalid
 	}
 	adapter, err := wintun.CreateAdapter(options.Name, TunnelType, generateGUIDByDeviceName(options.Name))
+	if err != nil && !errors.Is(err, os.ErrExist) {
+		// The adapter device never started (wintun waits 15s, then reports the
+		// device's problem status, typically "the system cannot find the file").
+		// Seen when a previous adapter under the same GUID was not fully torn
+		// down; retrying that GUID re-hits the residue until a reboot. Give
+		// Windows a moment, then take a random GUID: the network gets a fresh
+		// NLA profile, which beats not connecting at all.
+		fmt.Fprintf(os.Stderr, "%s create adapter failed, retrying with a random GUID: %v\n", time.Now().UTC().Format(time.RFC3339), err)
+		time.Sleep(3 * time.Second)
+		adapter, err = wintun.CreateAdapter(options.Name, TunnelType, nil)
+	}
 	if err != nil {
 		if !errors.Is(err, os.ErrExist) {
 			return nil, err

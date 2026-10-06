@@ -90,6 +90,7 @@ func (d *lazyDLL) Load() error {
 	d.Base = windows.Handle(module.BaseAddr())
 
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&d.module)), unsafe.Pointer(module))
+	setupLogger(d)
 	return nil
 }
 
